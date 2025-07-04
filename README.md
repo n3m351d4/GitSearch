@@ -35,7 +35,7 @@ pip install requests tqdm
 ## Пример запуска
 
 ```bash
-python gh_dork_download.py \
+python GitSearch.py \
   --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
   --resume
