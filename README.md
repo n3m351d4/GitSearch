@@ -66,41 +66,42 @@ findings.csv  # контекст + ссылки
 
 *Скрипт предназначен исключительно для законного аудита. Вы несёте полную ответственность за соблюдение GitHub TOS, законов о защите данных и уведомление владельцев репозиториев при обнаружении утечек.*
 
----
+<img width="1170" alt="Скрипт выкачивает все подряд файлы с гитхаба с ключевыми словами" src="https://github.com/user-attachments/assets/cf7ae597-1ed0-4355-9589-bb16d7aff9cc" />
 
-# 1. Title
-
-**Hunting Sensitive Data on GitHub: Dork Queries, API & Python Script**
-
-# 2. Introduction – Why GitHub Search Matters
-
-With 400 M+ repositories, GitHub has become the world’s largest code archive—and an endless source of accidental secrets. Engineers commit `.env` files; DevOps push CI logs; interns forget to purge test credentials. A proactive search keeps your brand and customers safe:
-
-- **Brand Protection** – catch exposed API tokens before attackers do.
-- **Blue‑Team Leak Hunting** – continuously scan your own public & internal org repos.
-
-This article shows how to automate the hunt using GitHub Code Search API and Python.
-
-# 3. Prerequisites
-
-| Requirement | Details |
-| --- | --- |
-| **GitHub PAT** | At least `public_repo` scope. Create via *Settings → Developer settings → Personal access tokens (Classic)*. |
-| **Python ≥ 3.10** | We use modern syntax and type hints. |
-| Extra libs | `requests`, `argparse`, `tqdm`, `csv`, `time`, `pathlib`, `signal`, `re`. Install with:`pip install requests tqdm` |
-
-# 4. Script Listing
-
-*(Identical to the Russian block above for easy copy‑paste.)*
-
-```python
-# see previous code block – same content
-
+```bash
+grep -R --line-number --color=auto "AWS_ACCESS_KEY_ID"    
 ```
 
-# 5. Step‑by‑Step Guide
+<img width="670" alt="Имеем на выходе кучу дедиков" src="https://github.com/user-attachments/assets/9ee54d74-4b1a-4a46-aad6-8678b6d72b92" />
 
-## Installation
+
+---
+
+# GitSearch
+Hunting Confidential Data on GitHub: Dork Queries, API, and a Python Script
+
+## Introduction — Why Search GitHub
+GitHub hosts more than 400 million repositories. Developers sometimes accidentally commit files containing passwords, API keys, and other secrets. Detecting such “leaks” is crucial for:
+
+**Brand Protection** — discovering company-specific tokens before attackers do.
+
+**Blue-Team Leak Hunting** — monitoring your public and internal repositories.
+
+This guide shows how to automate the process using the GitHub Code Search API and a Python script.
+
+## Prerequisites
+GitHub PAT — via @git_keys_shop_bot
+
+Python ≥ 3.10 — the script uses modern features like match/case and type hints.
+
+Libraries — requests, argparse, tqdm, csv, time, pathlib, signal, re.
+Install with:
+
+pip install requests tqdm
+
+## Step-by-Step Guide
+
+**Installation**
 
 ```bash
 python -m venv venv && source venv/bin/activate
@@ -108,39 +109,36 @@ pip install requests tqdm
 
 ```
 
-## Example Command
+## Example Run
 
 ```bash
-python gh_dork_download.py \
-  --token YOUR_GITHUB_PAT \
+python GitSearch.py \
+  --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
   --resume
 
 ```
 
-## Output Explained
+## What You Get
 
 ```
 output/
 └─ github.com/user/repo/.env
-findings.csv  # match context & links
-
+`findings.csv`  # context + links
 ```
 
-Open `findings.csv` in Excel, or pipe into a SIEM pipeline.
+Open findings.csv in Excel or any spreadsheet tool to filter rows.
 
-# 6. Use‑Case Scenarios
+## Use-Case Scenarios
 
-- **Brand Protection / Digital Risk** – discover leaked SaaS credentials, licensed SDK keys, or copyrighted assets.
-- **Internal Security Audits** – validate engineers follow secrets‑management policy; feed results into JIRA tickets.
+**Brand Protection** — detect leaked client SDK keys before search engines index them.
 
-# 7. Conclusion & Next Steps
+**Internal Audits** — automate scanning of the company’s open-source mirrors.
 
-The presented Python tool covers 10 000 results per run—enough for daily monitoring of high‑risk terms. Next, schedule it in `cron`, feed alerts into Slack, and add richer regexes to classify findings.
+##Conclusion & Next Steps
 
-# 8. Disclaimer – Legal & Ethical Usage
+With the GitHub API and a lightweight Python script, you can build a daily monitoring routine. Integrate the results into your SIEM or a Slack bot, and schedule it via cron for continuous coverage.
 
-This script is provided for legitimate security audits **only**. Always comply with GitHub Terms of Service, data‑protection laws, and responsible disclosure guidelines. Never use the data for malicious purposes.
+## Disclaimer
 
-# GitSearch
-Hunting Sensitive Data on GitHub: Dork Queries, API &amp; Python Script
+This script is intended solely for lawful security auditing. You are fully responsible for complying with GitHub’s Terms of Service, data-protection laws, and for notifying repository owners when leaks are discovered.
