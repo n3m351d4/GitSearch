@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""gh_dork_download.py – массовый скачиватель файлов по GitHub Code Search.
+"""GitSearch.py – массовый парсер файлов по GitHub Code Search.
 
 CLI: нужны только `--token` и `--dork`.
 * Сохраняет файлы и CSV‑отчёт в каталог **output/**.
-* Всегда начинает новую сессию (без резюме).
+* Всегда начинает новую сессию.
 * `findings.csv` содержит колонку `match_line` (первая строка с совпадением) и
   `context_excerpt` (±2 строки вокруг неё).
 * Перед стартом проверяет Search‑лимит GitHub и ждёт сброса, если `remaining=0`.
