@@ -6,29 +6,21 @@
 
 GitHub содержит более 400 миллионов репозиториев. Разработчики нередко случайно коммитят файлы с паролями, API‑ключами и другими секретами. Поиск таких «утечек» — важная задача для:
 
-Brand Protection – выявление использования фирменных токенов до того, как злоумышленники их найдут.
+**Brand Protection** – выявление использования фирменных токенов до того, как злоумышленники их найдут.
 
-Blue‑Team Leak Hunting – мониторинг собственных публичных и внутренних репозиториев.
+**Blue‑Team Leak Hunting** – мониторинг собственных публичных и внутренних репозиториев.
 
 Статья покажет, как автоматизировать процесс с помощью GitHub Code Search API и Python‑скрипта.
 
-3. Предварительные требования
+## Предварительные требования
 
-Требование
+[+] GitHub PAT - берем здесь: @git_keys_shop_bot
 
-Подробности
+[+] Python ≥ 3.10
 
-GitHub PAT
+[+] Используем match/case и typing.
 
-Минимум scope public_repo. Создайте в Settings → Developer settings → Personal access tokens (Classic).
-
-Python ≥ 3.10
-
-Используем match/case и typing.
-
-Доп. библиотеки
-
-requests, argparse, tqdm, csv, time, pathlib, signal, re. Устанавливаются командой:pip install requests tqdm
+[+] Дополнительные библиотеки - requests, argparse, tqdm, csv, time, pathlib, signal, re. Устанавливаются командой:pip install requests tqdm
 
 
 # GitSearch
