@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """gh_dork_download.py – массовый скачиватель файлов по GitHub Code Search.
-нейросетевой говнокод
+
 CLI: нужны только `--token` и `--dork`.
-* Файлы сохраняются в подкаталог **output/**.
-* Каждая сессия начинается с нуля.
-* Колонка **`match_line`** в `findings.csv` содержит первую строку, где реально
-  встретился любой из поисковых токенов (т.е. часть dork'а без qualifiers).
+* Сохраняет файлы и CSV‑отчёт в каталог **output/**.
+* Всегда начинает новую сессию (без резюме).
+* `findings.csv` содержит колонку `match_line` (первая строка с совпадением) и
+  `context_excerpt` (±2 строки вокруг неё).
+* Перед стартом проверяет Search‑лимит GitHub и ждёт сброса, если `remaining=0`.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import shlex
 import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Set
 
@@ -25,12 +27,15 @@ from tqdm import tqdm
 
 GITHUB_API_URL = "https://api.github.com/search/code"
 PER_PAGE = 100
-MAX_PAGES = 100  # 100 × 100 = 10 000 результатов
+MAX_PAGES = 100  # 10 000 результатов (GitHub всё равно вернёт ≤1 000)
 RATE_SLEEP = 1   # секунда между страницами
 OUTPUT_DIR = "output"
 
 abort = False
 
+###############################################################################
+# Signal handler
+###############################################################################
 
 def handle_sigint(signum, frame):  # type: ignore[assign]
     global abort
@@ -39,7 +44,6 @@ def handle_sigint(signum, frame):  # type: ignore[assign]
 
 
 signal.signal(signal.SIGINT, handle_sigint)
-
 
 ###############################################################################
 # CLI
@@ -51,9 +55,30 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dork", required=True, help="GitHub search dork, e.g. 'filename:.env DB_PASSWORD'")
     return p.parse_args()
 
+###############################################################################
+# Rate‑limit helpers
+###############################################################################
+
+def rate_status(headers: dict) -> tuple[int, int]:
+    """Return (remaining, reset_epoch) for Search API rate‑limit."""
+    try:
+        resp = requests.get("https://api.github.com/rate_limit", headers=headers, timeout=10)
+        data = resp.json()["resources"]["search"]
+        return int(data["remaining"]), int(data["reset"])
+    except Exception as exc:
+        print(f"[WARN] Не удалось получить /rate_limit: {exc}", file=sys.stderr)
+        return 0, int(time.time()) + 60
+
+
+def wait_until(reset_epoch: int):
+    wait = reset_epoch - int(time.time()) + 2  # +2 сек страховка
+    if wait > 0:
+        eta = datetime.fromtimestamp(reset_epoch).strftime("%H:%M:%S")
+        print(f"[RATE] Ждём {wait}s до {eta}", file=sys.stderr)
+        time.sleep(wait)
 
 ###############################################################################
-# Helpers
+# Utility helpers
 ###############################################################################
 
 def html_to_raw(html_url: str) -> str:
@@ -74,7 +99,7 @@ def save_file(raw_url: str, dest_path: Path) -> None:
 
 
 def build_patterns(dork: str) -> List[re.Pattern[str]]:
-    """Из dork-строки выбираем токены без ':' и собираем regex-паттерны."""
+    """Из dork‑строки выделяем токены без ':' и строим regex‑паттерны."""
     tokens = shlex.split(dork)
     search_tokens = [t for t in tokens if ':' not in t]
     if not search_tokens:
@@ -83,7 +108,7 @@ def build_patterns(dork: str) -> List[re.Pattern[str]]:
 
 
 def first_match_line(lines: List[str], patterns: List[re.Pattern[str]]) -> tuple[int, str]:
-    """Возвращает (строка №, строка‑текст) первого совпадения любого паттерна."""
+    """Возвращает (номер строки, текст) первого совпадения любого паттерна."""
     for idx, line in enumerate(lines):
         for pat in patterns:
             if pat.search(line):
@@ -98,7 +123,6 @@ def context_excerpt(lines: List[str], idx: int) -> str:
     end = min(idx + 1, len(lines))
     return "".join(lines[start:end]).strip()[:1000]
 
-
 ###############################################################################
 # Main
 ###############################################################################
@@ -112,68 +136,74 @@ def main() -> None:
 
     processed: Set[str] = set()
 
-    csv_file = csv_path.open("w", newline="", encoding="utf-8")
-    writer = csv.writer(csv_file)
-    writer.writerow(["repo", "file_path", "line_number", "match_line", "context_excerpt", "github_url"])
+    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["repo", "file_path", "line_number", "match_line", "context_excerpt", "github_url"])
 
-    headers = {
-        "Authorization": f"token {args.token}",
-        "Accept": "application/vnd.github.v3.text-match+json",
-        "User-Agent": "gh_dork_download/1.2",
-    }
+        headers = {
+            "Authorization": f"token {args.token}",
+            "Accept": "application/vnd.github.v3.text-match+json",
+            "User-Agent": "gh_dork_download/1.4",
+        }
 
-    patterns = build_patterns(args.dork)
+        # Проверяем лимит до старта
+        remaining, reset_epoch = rate_status(headers)
+        print(
+            f"[RATE] Search remaining: {remaining}/30; reset @ {datetime.fromtimestamp(reset_epoch).strftime('%H:%M:%S')}"
+        )
+        if remaining == 0:
+            wait_until(reset_epoch)
 
-    pbar = tqdm(total=MAX_PAGES, desc="Pages", unit="page")
-    try:
-        for page in range(1, MAX_PAGES + 1):
-            if abort:
-                break
+        patterns = build_patterns(args.dork)
 
-            params = {"q": args.dork, "per_page": PER_PAGE, "page": page}
-            resp = requests.get(GITHUB_API_URL, headers=headers, params=params, timeout=60)
-            if resp.status_code == 403 and "rate limit" in resp.text.lower():
-                reset = int(resp.headers.get("X-RateLimit-Reset", 0))
-                wait = max(reset - int(time.time()) + 5, 30)
-                print(f"[!] Rate-limit. Спим {wait} с…", file=sys.stderr)
-                time.sleep(wait)
-                continue
-            resp.raise_for_status()
-            items = resp.json().get("items", [])
-            if not items:
-                break
+        pbar = tqdm(total=MAX_PAGES, desc="Pages", unit="page")
+        try:
+            for page in range(1, MAX_PAGES + 1):
+                if abort:
+                    break
 
-            for item in items:
-                html_url = item["html_url"]
-                if html_url in processed:
+                params = {"q": args.dork, "per_page": PER_PAGE, "page": page}
+                resp = requests.get(GITHUB_API_URL, headers=headers, params=params, timeout=60)
+                if resp.status_code == 403 and "rate limit" in resp.text.lower():
+                    remaining, reset_epoch = rate_status(headers)
+                    wait_until(reset_epoch)
                     continue
 
-                repo = item["repository"]["full_name"]
-                rel_path = item["path"]
-                raw_url = html_to_raw(html_url)
-                dest_path = out_root / "github.com" / repo / rel_path
+                resp.raise_for_status()
+                items = resp.json().get("items", [])
+                if not items:
+                    break
 
-                save_file(raw_url, dest_path)
+                for item in items:
+                    html_url = item["html_url"]
+                    if html_url in processed:
+                        continue
 
-                try:
-                    lines = dest_path.read_text(errors="ignore").splitlines()
-                except Exception:
-                    lines = []
-                line_no, match_line = first_match_line(lines, patterns)
-                excerpt = context_excerpt(lines, line_no - 1)
+                    repo = item["repository"]["full_name"]
+                    rel_path = item["path"]
+                    raw_url = html_to_raw(html_url)
+                    dest_path = out_root / "github.com" / repo / rel_path
 
-                writer.writerow([repo, rel_path, line_no, match_line, excerpt, html_url])
-                csv_file.flush()
-                processed.add(html_url)
+                    save_file(raw_url, dest_path)
 
-            time.sleep(RATE_SLEEP)
-            pbar.update(1)
-            if len(items) < PER_PAGE:
-                break
-    finally:
-        pbar.close()
-        csv_file.close()
-        print("[+] Завершено. Итоги записаны в", csv_path)
+                    try:
+                        lines = dest_path.read_text(errors="ignore").splitlines()
+                    except Exception:
+                        lines = []
+                    line_no, match_line = first_match_line(lines, patterns)
+                    excerpt = context_excerpt(lines, line_no - 1)
+
+                    writer.writerow([repo, rel_path, line_no, match_line, excerpt, html_url])
+                    csv_file.flush()
+                    processed.add(html_url)
+
+                time.sleep(RATE_SLEEP)
+                pbar.update(1)
+                if len(items) < PER_PAGE:
+                    break
+        finally:
+            pbar.close()
+            print("[+] Завершено. Итоги записаны в", csv_path)
 
 
 if __name__ == "__main__":
