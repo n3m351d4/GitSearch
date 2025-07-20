@@ -41,6 +41,12 @@ python GitSearch.py \
 
 ```
 
+## Запуск тестов
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Что появится
 
 ```
@@ -122,6 +128,12 @@ python GitSearch.py \
   --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
 
+```
+
+## Running Tests
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## What You Get
