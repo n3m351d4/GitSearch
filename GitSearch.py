@@ -120,7 +120,7 @@ def context_excerpt(lines: List[str], idx: int) -> str:
     if idx == 0:
         return ""
     start = max(idx - 2, 0)
-    end = min(idx + 1, len(lines))
+    end = min(idx + 3, len(lines))
     return "".join(lines[start:end]).strip()[:1000]
 
 ###############################################################################

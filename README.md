@@ -42,6 +42,12 @@ python GitSearch.py \
 
 ```
 
+## Запуск тестов
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Что появится
 
 ```
@@ -124,6 +130,12 @@ python GitSearch.py \
   --dork "filename:.env DB_PASSWORD" \
   --resume
 
+```
+
+## Running Tests
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## What You Get
