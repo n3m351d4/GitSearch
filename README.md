@@ -38,7 +38,6 @@ pip install requests tqdm
 python GitSearch.py \
   --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
-  --resume
 
 ```
 
@@ -128,7 +127,6 @@ pip install requests tqdm
 python GitSearch.py \
   --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
-  --resume
 
 ```
 
