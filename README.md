@@ -152,7 +152,7 @@ Open findings.csv in Excel or any spreadsheet tool to filter rows.
 
 **Internal Audits** — automate scanning of the company’s open-source mirrors.
 
-##Conclusion & Next Steps
+## Conclusion & Next Steps
 
 With the GitHub API and a lightweight Python script, you can build a daily monitoring routine. Integrate the results into your SIEM or a Slack bot, and schedule it via cron for continuous coverage.
 
