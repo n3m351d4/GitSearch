@@ -117,6 +117,16 @@ def first_match_line(lines: List[str], patterns: List[re.Pattern[str]]) -> tuple
 
 
 def context_excerpt(lines: List[str], idx: int) -> str:
+    """Return an excerpt of lines around ``idx`` if ``idx`` > 0.
+
+    The index is assumed to be zero-based.  When ``idx`` is ``0`` or less
+    (e.g. when a match is not found), an empty string is returned to keep the
+    output concise.
+    """
+
+    if idx <= 0:
+        return ""
+
     start = max(idx - 2, 0)
     end = min(idx + 3, len(lines))
     return "".join(lines[start:end]).strip()[:1000]
