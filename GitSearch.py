@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import re
 import shlex
 import signal
@@ -19,7 +20,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set
+from typing import Iterable, List, Set
+
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from requests.exceptions import RequestException
@@ -27,9 +30,9 @@ from tqdm import tqdm
 
 GITHUB_API_URL = "https://api.github.com/search/code"
 PER_PAGE = 100
-MAX_PAGES = 100  # 10 000 результатов (GitHub всё равно вернёт ≤1 000)
-RATE_SLEEP = 1   # секунда между страницами
-OUTPUT_DIR = "output"
+DEFAULT_MAX_PAGES = 100  # 10 000 результатов (GitHub всё равно вернёт ≤1 000)
+DEFAULT_RATE_SLEEP = 1   # секунда между страницами
+DEFAULT_OUTPUT_DIR = "output"
 
 abort = False
 
@@ -53,6 +56,14 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Download GitHub search hits and log findings.")
     p.add_argument("--token", required=True, help="GitHub Personal Access Token")
     p.add_argument("--dork", required=True, help="GitHub search dork, e.g. 'filename:.env DB_PASSWORD'")
+    p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Directory to store downloaded files and CSV")
+    p.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES, help="Maximum result pages to fetch")
+    p.add_argument("--rate-sleep", type=float, default=DEFAULT_RATE_SLEEP, help="Sleep interval between API pages")
+    p.add_argument("--patterns-file", help="File with extra regex patterns, one per line")
+    p.add_argument("--log-file", help="Path to log file (default: <output-dir>/gitsearch.log)")
+    p.add_argument("--slack-webhook", help="Slack webhook URL for notifications")
+    p.add_argument("--telegram-token", help="Telegram bot token for notifications")
+    p.add_argument("--telegram-chat", help="Telegram chat id for notifications")
     return p.parse_args()
 
 ###############################################################################
@@ -98,13 +109,30 @@ def save_file(raw_url: str, dest_path: Path) -> None:
     dest_path.write_bytes(r.content)
 
 
-def build_patterns(dork: str) -> List[re.Pattern[str]]:
-    """Из dork‑строки выделяем токены без ':' и строим regex‑паттерны."""
+BUILTIN_PATTERNS = [
+    r"AKIA[0-9A-Z]{16}",  # AWS Access Key
+    r"\d{9}:[A-Za-z0-9_-]{35}",  # Telegram bot token
+]
+
+
+def build_patterns(dork: str, extra: Iterable[str] | None = None) -> List[re.Pattern[str]]:
+    """Из dork‑строки выделяем токены без ':' и строим regex‑паттерны.
+
+    ``extra`` позволяет добавить пользовательские паттерны.
+    """
     tokens = shlex.split(dork)
     search_tokens = [t for t in tokens if ':' not in t]
     if not search_tokens:
         search_tokens = [tokens[-1]]  # fallback – последний токен
-    return [re.compile(re.escape(tok), re.IGNORECASE) for tok in search_tokens]
+    patterns = [re.compile(re.escape(tok), re.IGNORECASE) for tok in search_tokens]
+    for pat in BUILTIN_PATTERNS:
+        patterns.append(re.compile(pat, re.IGNORECASE))
+    if extra:
+        for line in extra:
+            line = line.strip()
+            if line:
+                patterns.append(re.compile(line, re.IGNORECASE))
+    return patterns
 
 
 def first_match_line(lines: List[str], patterns: List[re.Pattern[str]]) -> tuple[int, str]:
@@ -132,6 +160,21 @@ def context_excerpt(lines: List[str], idx: int) -> str:
     return "".join(lines[start:end]).strip()[:1000]
 
 
+def send_slack(webhook: str, text: str) -> None:
+    try:
+        requests.post(webhook, json={"text": text}, timeout=10)
+    except Exception as exc:
+        logging.warning("Slack notify failed: %s", exc)
+
+
+def send_telegram(token: str, chat: str, text: str) -> None:
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        requests.post(url, data={"chat_id": chat, "text": text}, timeout=10)
+    except Exception as exc:
+        logging.warning("Telegram notify failed: %s", exc)
+
+
 ###############################################################################
 # Main
 ###############################################################################
@@ -139,15 +182,28 @@ def context_excerpt(lines: List[str], idx: int) -> str:
 def main() -> None:
     args = parse_args()
 
-    out_root = Path(OUTPUT_DIR)
+    out_root = Path(args.output_dir)
     out_root.mkdir(parents=True, exist_ok=True)
     csv_path = out_root / "findings.csv"
 
-    processed: Set[str] = set()
+    log_path = Path(args.log_file) if args.log_file else out_root / "gitsearch.log"
+    logging.basicConfig(filename=log_path, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+    processed: Set[str] = set()
+    if csv_path.exists():
+        try:
+            with csv_path.open("r", encoding="utf-8") as prev:
+                reader = csv.DictReader(prev)
+                processed.update(row.get("github_url", "") for row in reader)
+        except Exception as exc:
+            logging.warning("Could not read existing CSV: %s", exc)
+
+    mode = "a" if processed else "w"
+
+    with csv_path.open(mode, newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow(["repo", "file_path", "line_number", "match_line", "context_excerpt", "github_url"])
+        if mode == "w":
+            writer.writerow(["repo", "file_path", "line_number", "match_line", "context_excerpt", "github_url"])
 
         headers = {
             "Authorization": f"token {args.token}",
@@ -163,11 +219,17 @@ def main() -> None:
         if remaining == 0:
             wait_until(reset_epoch)
 
-        patterns = build_patterns(args.dork)
+        extra_lines: List[str] = []
+        if args.patterns_file:
+            try:
+                extra_lines = Path(args.patterns_file).read_text().splitlines()
+            except Exception as exc:
+                logging.warning("Could not read patterns file: %s", exc)
+        patterns = build_patterns(args.dork, extra_lines)
 
-        pbar = tqdm(total=MAX_PAGES, desc="Pages", unit="page")
+        pbar = tqdm(total=args.max_pages, desc="Pages", unit="page")
         try:
-            for page in range(1, MAX_PAGES + 1):
+            for page in range(1, args.max_pages + 1):
                 if abort:
                     break
 
@@ -183,30 +245,54 @@ def main() -> None:
                 if not items:
                     break
 
-                for item in items:
-                    html_url = item["html_url"]
-                    if html_url in processed:
-                        continue
+                futures = {}
+                with ThreadPoolExecutor(max_workers=5) as pool:
+                    for item in items:
+                        html_url = item["html_url"]
+                        if html_url in processed:
+                            continue
 
-                    repo = item["repository"]["full_name"]
-                    rel_path = item["path"]
-                    raw_url = html_to_raw(html_url)
-                    dest_path = out_root / "github.com" / repo / rel_path
+                        repo = item["repository"]["full_name"]
+                        rel_path = item["path"]
+                        raw_url = html_to_raw(html_url)
+                        dest_path = out_root / "github.com" / repo / rel_path
 
-                    save_file(raw_url, dest_path)
+                        futures[pool.submit(save_file, raw_url, dest_path)] = (
+                            repo,
+                            rel_path,
+                            html_url,
+                            dest_path,
+                        )
 
-                    try:
-                        lines = dest_path.read_text(errors="ignore").splitlines()
-                    except Exception:
-                        lines = []
-                    line_no, match_line = first_match_line(lines, patterns)
-                    excerpt = context_excerpt(lines, line_no - 1)
+                    for fut, data in futures.items():
+                        fut.result()
+                        repo, rel_path, html_url, dest_path = data
 
-                    writer.writerow([repo, rel_path, line_no, match_line, excerpt, html_url])
-                    csv_file.flush()
-                    processed.add(html_url)
+                        try:
+                            lines = dest_path.read_text(errors="ignore").splitlines()
+                        except Exception:
+                            lines = []
+                        line_no, match_line = first_match_line(lines, patterns)
+                        excerpt = context_excerpt(lines, line_no - 1)
 
-                time.sleep(RATE_SLEEP)
+                        writer.writerow([
+                            repo,
+                            rel_path,
+                            line_no,
+                            match_line,
+                            excerpt,
+                            html_url,
+                        ])
+                        csv_file.flush()
+                        processed.add(html_url)
+
+                        notify_text = f"{repo}/{rel_path} @{line_no} {html_url}"
+                        if args.slack_webhook:
+                            send_slack(args.slack_webhook, notify_text)
+                        if args.telegram_token and args.telegram_chat:
+                            send_telegram(args.telegram_token, args.telegram_chat, notify_text)
+
+                time.sleep(args.rate_sleep)
                 pbar.update(1)
                 if len(items) < PER_PAGE:
                     break

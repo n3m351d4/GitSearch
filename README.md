@@ -38,7 +38,9 @@ pip install requests tqdm
 python GitSearch.py \
   --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
-
+  --output-dir my_results \
+  --max-pages 50 \
+  --rate-sleep 2
 ```
 
 ## Запуск тестов
@@ -81,7 +83,7 @@ grep -R --line-number --color=auto "AWS_ACCESS_KEY_ID"
 
 # Заключение и дальнейшие шаги
 
-Используя GitHub API и простой Python‑скрипт, можно построить ежедневный мониторинг. Рекомендуется интегрировать результат с SIEM или Slack‑ботом и настроить cron‑запуск.
+Используя GitHub API и простой Python‑скрипт, можно построить ежедневный мониторинг. Скрипт поддерживает уведомления в Slack и Telegram и легко интегрируется с SIEM. Настройте cron‑запуск для непрерывного контроля.
 
 # Дисклеймер
 
@@ -127,6 +129,9 @@ pip install requests tqdm
 python GitSearch.py \
   --token $GITHUB_PAT \
   --dork "filename:.env DB_PASSWORD" \
+  --output-dir my_results \
+  --max-pages 50 \
+  --rate-sleep 2
 
 ```
 
@@ -154,7 +159,7 @@ Open findings.csv in Excel or any spreadsheet tool to filter rows.
 
 ## Conclusion & Next Steps
 
-With the GitHub API and a lightweight Python script, you can build a daily monitoring routine. Integrate the results into your SIEM or a Slack bot, and schedule it via cron for continuous coverage.
+With the GitHub API and a lightweight Python script, you can build a daily monitoring routine. The script can notify Slack and Telegram or feed results into your SIEM. Schedule it via cron for continuous coverage.
 
 ## Disclaimer
 
