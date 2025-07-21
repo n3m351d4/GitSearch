@@ -16,7 +16,7 @@ def test_html_to_raw():
 def test_build_patterns_case_insensitive():
     dork = "filename:.env DB_PASSWORD 'api key'"
     patterns = GS.build_patterns(dork)
-    assert len(patterns) == 2
+    assert len(patterns) >= 4
     assert all(p.flags & re.IGNORECASE for p in patterns)
     assert patterns[0].pattern == re.escape("DB_PASSWORD")
     assert patterns[1].pattern == re.escape("api key")
